@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Review: {{ question.text }} - Bar Feud{% endblock %}
+{% block bodyclass %}admin{% endblock %}
+
+{% block content %}
+<div class="admin-container">
+    <a href="{{ url_for('admin_dashboard') }}" class="back-link">Back to Dashboard</a>
+
+    <div class="card">
+        <h2>{{ question.text }}</h2>
+        {% if question.week_label %}<span class="week-tag">{{ question.week_label }}</span>{% endif %}
+        <p class="muted">{{ raw|length }} total responses</p>
+    </div>
+
+    <!-- Consolidated / Fuzzy-Matched Answers -->
+    <div class="card">
+        <div class="card-header">
+            <h2>Consolidated Answers</h2>
+            <form method="POST" action="{{ url_for('save_board', qid=question.id) }}">
+                <button type="submit" class="btn btn-primary btn-sm">Save as Game Board</button>
+            </form>
+        </div>
+        <p class="muted">Answers auto-grouped by similarity. Click an answer to rename it.</p>
+
+        {% if not consolidated %}
+        <p class="muted">No responses yet.</p>
+        {% else %}
+        <div class="board-preview">
+            {% for item in consolidated[:8] %}
+            <div class="board-row">
+                <span class="rank">#{{ item.rank }}</span>
+                <span class="answer editable" data-qid="{{ question.id }}" data-label="{{ item.display_answer }}">
+                    {{ item.display_answer }}
+                </span>
+                <span class="count">{{ item.count }} responses</span>
+                <span class="points">{{ item.points }} pts</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Raw Responses -->
+    <div class="card">
+        <h2>Raw Responses</h2>
+        <div class="raw-list">
+            {% for r in raw %}
+            <div class="raw-row">
+                <span class="raw-answer">{{ r.answer }}</span>
+                <span class="raw-meta">{{ r.respondent or "Anonymous" }} &middot; {{ r.created_at }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.querySelectorAll('.editable').forEach(el => {
+    el.addEventListener('click', async () => {
+        const oldLabel = el.dataset.label;
+        const newLabel = prompt('Rename this answer:', oldLabel);
+        if (newLabel && newLabel !== oldLabel) {
+            const qid = el.dataset.qid;
+            const res = await fetch(`/admin/questions/${qid}/edit-answer`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({old_label: oldLabel, new_label: newLabel})
+            });
+            if (res.ok) {
+                el.textContent = newLabel;
+                el.dataset.label = newLabel;
+            }
+        }
+    });
+});
+</script>
+{% endblock %}

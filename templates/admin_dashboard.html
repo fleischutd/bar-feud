@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Admin Dashboard - Bar Feud{% endblock %}
+{% block bodyclass %}admin{% endblock %}
+
+{% block content %}
+<div class="admin-container">
+    <div class="admin-header">
+        <h1>BAR FEUD <span class="badge">Admin</span></h1>
+        <div class="admin-nav">
+            <a href="{{ url_for('gameboard') }}" class="btn btn-sm">Game Board</a>
+            <a href="{{ url_for('survey') }}" class="btn btn-sm">Survey View</a>
+            <form method="POST" action="{{ url_for('reset_week') }}" style="display:inline">
+                <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Deactivate all questions for a new week?')">New Week</button>
+            </form>
+            <a href="{{ url_for('admin_logout') }}" class="btn btn-sm btn-outline">Logout</a>
+        </div>
+    </div>
+
+    <!-- QR Code for Survey -->
+    <div class="card qr-card">
+        <div class="qr-section">
+            <div class="qr-info">
+                <h2>Survey Link</h2>
+                <p>Share this with the bar - patrons scan to answer</p>
+                <div class="survey-url">{{ survey_url }}</div>
+            </div>
+            <div class="qr-image">
+                <img src="{{ qr_data }}" alt="Scan to take survey" width="180" height="180">
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Question -->
+    <div class="card">
+        <h2>Add Question</h2>
+        <form method="POST" action="{{ url_for('add_question') }}" class="add-form">
+            <input type="text" name="text" placeholder='e.g. "Name something you order at this bar"' class="text-input" required>
+            <input type="text" name="week_label" placeholder="Week label (optional, e.g. Week 3)" class="text-input text-input-sm">
+            <button type="submit" class="btn btn-primary">Add Question</button>
+        </form>
+    </div>
+
+    <!-- Questions List -->
+    <div class="card">
+        <h2>Questions</h2>
+        {% if not questions %}
+        <p class="muted">No questions yet. Add one above!</p>
+        {% endif %}
+        {% for q in questions %}
+        <div class="question-row {% if not q.active %}inactive{% endif %}">
+            <div class="question-info">
+                <span class="status-dot {% if q.active %}active{% endif %}"></span>
+                <div>
+                    <strong>{{ q.text }}</strong>
+                    {% if q.week_label %}<span class="week-tag">{{ q.week_label }}</span>{% endif %}
+                    <div class="response-count">{{ stats[q.id] }} responses</div>
+                </div>
+            </div>
+            <div class="question-actions">
+                <a href="{{ url_for('view_responses', qid=q.id) }}" class="btn btn-sm">Review</a>
+                <a href="{{ url_for('toggle_question', qid=q.id) }}" class="btn btn-sm btn-outline">
+                    {{ "Deactivate" if q.active else "Activate" }}
+                </a>
+                <form method="POST" action="{{ url_for('delete_question', qid=q.id) }}" style="display:inline">
+                    <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Delete this question and all its responses?')">Delete</button>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

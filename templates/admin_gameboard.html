@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Game Board - Bar Feud{% endblock %}
+{% block bodyclass %}admin gameboard-page{% endblock %}
+
+{% block content %}
+<div class="admin-container">
+    <a href="{{ url_for('admin_dashboard') }}" class="back-link">Back to Dashboard</a>
+    <h1 class="gameboard-title">GAME BOARD</h1>
+
+    {% if not questions %}
+    <div class="card">
+        <p class="muted">No game boards saved yet. Review questions and click "Save as Game Board" to create one.</p>
+    </div>
+    {% endif %}
+
+    {% for q in questions %}
+    <div class="card gameboard-card">
+        <h2 class="gb-question">{{ q.text }}</h2>
+        {% if q.week_label %}<span class="week-tag">{{ q.week_label }}</span>{% endif %}
+
+        <div class="feud-board" id="board-{{ q.id }}">
+            {% for ans in boards[q.id] %}
+            <div class="feud-row hidden-answer" data-index="{{ loop.index0 }}">
+                <div class="feud-rank">{{ ans.rank }}</div>
+                <div class="feud-answer">{{ ans.display_answer }}</div>
+                <div class="feud-points">{{ ans.points }}</div>
+            </div>
+            {% endfor %}
+        </div>
+        <button class="btn btn-primary btn-sm reveal-btn" data-board="board-{{ q.id }}">Reveal Next</button>
+        <button class="btn btn-sm btn-outline reset-btn" data-board="board-{{ q.id }}">Reset</button>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.querySelectorAll('.reveal-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const board = document.getElementById(btn.dataset.board);
+        const hidden = board.querySelector('.hidden-answer');
+        if (hidden) {
+            hidden.classList.remove('hidden-answer');
+            hidden.classList.add('revealed');
+        }
+    });
+});
+document.querySelectorAll('.reset-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const board = document.getElementById(btn.dataset.board);
+        board.querySelectorAll('.feud-row').forEach(row => {
+            row.classList.add('hidden-answer');
+            row.classList.remove('revealed');
+        });
+    });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Bar Feud - Survey{% endblock %}
+{% block bodyclass %}client{% endblock %}
+
+{% block content %}
+<div class="survey-container">
+    <div class="logo">
+        <h1>BAR FEUD</h1>
+        <p class="tagline">Answer the questions. See if the crowd agrees.</p>
+    </div>
+
+    {% if not questions %}
+    <div class="card empty-state">
+        <h2>No active questions right now</h2>
+        <p>Check back soon - new questions drop every week!</p>
+    </div>
+    {% else %}
+    <form method="POST" action="{{ url_for('submit') }}">
+        <div class="card">
+            <label class="input-label" for="respondent">Your Name (optional)</label>
+            <input type="text" id="respondent" name="respondent" placeholder="Anonymous" class="text-input">
+        </div>
+
+        {% for q in questions %}
+        <div class="card {% if q.id in submitted %}submitted{% endif %}">
+            <div class="q-number">Q{{ loop.index }}</div>
+            <label class="question-text" for="answer_{{ q.id }}">{{ q.text }}</label>
+            {% if q.id in submitted %}
+            <div class="already-answered">Answer submitted!</div>
+            {% else %}
+            <input type="text" id="answer_{{ q.id }}" name="answer_{{ q.id }}"
+                   placeholder="Your answer..." class="text-input" autocomplete="off">
+            {% endif %}
+        </div>
+        {% endfor %}
+
+        <button type="submit" class="btn btn-primary btn-full">Submit Answers</button>
+    </form>
+    {% endif %}
+</div>
+{% endblock %}

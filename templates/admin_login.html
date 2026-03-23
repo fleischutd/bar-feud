@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Admin Login - Bar Feud{% endblock %}
+{% block bodyclass %}admin{% endblock %}
+
+{% block content %}
+<div class="login-container">
+    <h1>BAR FEUD</h1>
+    <h2>Admin Login</h2>
+    <form method="POST">
+        <input type="password" name="password" placeholder="Password" class="text-input" autofocus>
+        <button type="submit" class="btn btn-primary btn-full">Login</button>
+    </form>
+    <a href="{{ url_for('survey') }}" class="back-link">Back to Survey</a>
+</div>
+{% endblock %}

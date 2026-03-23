@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: bar-feud
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: ADMIN_PASSWORD
+        value: barfeud2026
+      - key: PYTHON_VERSION
+        value: 3.11.0

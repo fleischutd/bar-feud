@@ -1,0 +1,5 @@
+flask
+thefuzz
+python-Levenshtein
+qrcode[pil]
+gunicorn
