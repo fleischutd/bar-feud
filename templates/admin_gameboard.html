@@ -5,7 +5,10 @@
 {% block content %}
 <div class="admin-container">
     <a href="{{ url_for('admin_dashboard') }}" class="back-link">Back to Dashboard</a>
-    <h1 class="gameboard-title">GAME BOARD</h1>
+    <div class="admin-header" style="border: none; padding-bottom: 0;">
+        <h1 class="gameboard-title" style="margin-bottom: 0;">GAME BOARD</h1>
+        <a href="{{ url_for('live_board') }}" class="btn btn-sm btn-outline" target="_blank">Open Client View</a>
+    </div>
 
     {% if not questions %}
     <div class="card">
@@ -20,15 +23,16 @@
 
         <div class="feud-board" id="board-{{ q.id }}">
             {% for ans in boards[q.id] %}
-            <div class="feud-row hidden-answer" data-index="{{ loop.index0 }}">
+            <div class="feud-row {% if not ans.revealed %}hidden-answer{% else %}revealed{% endif %}" data-index="{{ loop.index0 }}">
                 <div class="feud-rank">{{ ans.rank }}</div>
                 <div class="feud-answer">{{ ans.display_answer }}</div>
                 <div class="feud-points">{{ ans.points }}</div>
             </div>
             {% endfor %}
         </div>
-        <button class="btn btn-primary btn-sm reveal-btn" data-board="board-{{ q.id }}">Reveal Next</button>
-        <button class="btn btn-sm btn-outline reset-btn" data-board="board-{{ q.id }}">Reset</button>
+        <button class="btn btn-primary btn-sm reveal-btn" data-qid="{{ q.id }}" data-board="board-{{ q.id }}">Reveal Next</button>
+        <button class="btn btn-sm btn-outline reset-btn" data-qid="{{ q.id }}" data-board="board-{{ q.id }}">Reset</button>
+        <button class="btn btn-sm btn-danger buzzer-btn" style="margin-top: 16px; margin-left: 8px;">STRIKE!</button>
     </div>
     {% endfor %}
 </div>
@@ -36,24 +40,87 @@
 
 {% block scripts %}
 <script>
+// ── Sound Effects ──────────────────────────────────────────────────────────
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+const audioCtx = new AudioCtx();
+
+function playDing() {
+    // Classic Family Feud "ding" - bright bell tone
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(1200, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.15);
+    gain.gain.setValueAtTime(0.6, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+    osc.start(audioCtx.currentTime);
+    osc.stop(audioCtx.currentTime + 0.5);
+
+    // Second harmonic for richness
+    const osc2 = audioCtx.createOscillator();
+    const gain2 = audioCtx.createGain();
+    osc2.connect(gain2);
+    gain2.connect(audioCtx.destination);
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(2400, audioCtx.currentTime);
+    osc2.frequency.exponentialRampToValueAtTime(1600, audioCtx.currentTime + 0.1);
+    gain2.gain.setValueAtTime(0.3, audioCtx.currentTime);
+    gain2.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+    osc2.start(audioCtx.currentTime);
+    osc2.stop(audioCtx.currentTime + 0.3);
+}
+
+function playBuzzer() {
+    // Classic Family Feud "X" buzzer
+    const duration = 0.8;
+    for (let i = 0; i < 3; i++) {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(150 + Math.random() * 20, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+        osc.start(audioCtx.currentTime);
+        osc.stop(audioCtx.currentTime + duration);
+    }
+}
+
+// ── Reveal (synced to server) ──────────────────────────────────────────────
 document.querySelectorAll('.reveal-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
+        const qid = btn.dataset.qid;
         const board = document.getElementById(btn.dataset.board);
-        const hidden = board.querySelector('.hidden-answer');
-        if (hidden) {
-            hidden.classList.remove('hidden-answer');
-            hidden.classList.add('revealed');
+        const res = await fetch(`/admin/questions/${qid}/reveal-next`, { method: 'POST' });
+        const data = await res.json();
+        if (data.ok) {
+            const hidden = board.querySelector('.hidden-answer');
+            if (hidden) {
+                hidden.classList.remove('hidden-answer');
+                hidden.classList.add('revealed');
+                playDing();
+            }
         }
     });
 });
+
 document.querySelectorAll('.reset-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
+        const qid = btn.dataset.qid;
         const board = document.getElementById(btn.dataset.board);
+        await fetch(`/admin/questions/${qid}/reset-reveals`, { method: 'POST' });
         board.querySelectorAll('.feud-row').forEach(row => {
             row.classList.add('hidden-answer');
             row.classList.remove('revealed');
         });
     });
+});
+
+document.querySelectorAll('.buzzer-btn').forEach(btn => {
+    btn.addEventListener('click', () => playBuzzer());
 });
 </script>
 {% endblock %}

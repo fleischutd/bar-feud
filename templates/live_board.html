@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}Bar Feud - Live Board{% endblock %}
+{% block bodyclass %}client gameboard-page{% endblock %}
+
+{% block content %}
+<div class="admin-container live-board-container">
+    <h1 class="gameboard-title">BAR FEUD</h1>
+
+    {% if not questions %}
+    <div class="card empty-state">
+        <h2>Game starting soon...</h2>
+        <p>The board will appear here when the host is ready!</p>
+    </div>
+    {% endif %}
+
+    {% for q in questions %}
+    <div class="card gameboard-card" data-qid="{{ q.id }}">
+        <h2 class="gb-question">{{ q.text }}</h2>
+        {% if q.week_label %}<span class="week-tag">{{ q.week_label }}</span>{% endif %}
+
+        <div class="feud-board" id="board-{{ q.id }}">
+            {% for ans in boards[q.id] %}
+            <div class="feud-row {% if not ans.revealed %}hidden-answer{% endif %} {% if ans.revealed %}revealed{% endif %}"
+                 data-rank="{{ ans.rank }}">
+                <div class="feud-rank">{{ ans.rank }}</div>
+                <div class="feud-answer">{{ ans.display_answer }}</div>
+                <div class="feud-points">{{ ans.points }}</div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+
+    <p class="muted" style="text-align: center; margin-top: 24px; font-size: 13px;">
+        Live updates - answers reveal automatically
+    </p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Sound effect for client-side reveals
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+const audioCtx = new AudioCtx();
+
+function playDing() {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(1200, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.15);
+    gain.gain.setValueAtTime(0.6, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+    osc.start(audioCtx.currentTime);
+    osc.stop(audioCtx.currentTime + 0.5);
+
+    const osc2 = audioCtx.createOscillator();
+    const gain2 = audioCtx.createGain();
+    osc2.connect(gain2);
+    gain2.connect(audioCtx.destination);
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(2400, audioCtx.currentTime);
+    osc2.frequency.exponentialRampToValueAtTime(1600, audioCtx.currentTime + 0.1);
+    gain2.gain.setValueAtTime(0.3, audioCtx.currentTime);
+    gain2.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+    osc2.start(audioCtx.currentTime);
+    osc2.stop(audioCtx.currentTime + 0.3);
+}
+
+// Poll for updates every 2 seconds
+let lastState = {};
+
+async function pollBoard() {
+    try {
+        const res = await fetch('/api/board-state');
+        const data = await res.json();
+
+        for (const [qid, question] of Object.entries(data)) {
+            const board = document.getElementById(`board-${qid}`);
+            if (!board) {
+                // New question appeared - reload page
+                location.reload();
+                return;
+            }
+
+            question.answers.forEach((ans, i) => {
+                const row = board.children[i];
+                if (!row) return;
+
+                const wasHidden = row.classList.contains('hidden-answer');
+                if (ans.revealed && wasHidden) {
+                    // This answer was just revealed!
+                    row.classList.remove('hidden-answer');
+                    row.classList.add('revealed');
+                    // Resume audio context (browsers require user gesture)
+                    if (audioCtx.state === 'suspended') audioCtx.resume();
+                    playDing();
+                } else if (!ans.revealed && !wasHidden) {
+                    // Answer was hidden again (reset)
+                    row.classList.add('hidden-answer');
+                    row.classList.remove('revealed');
+                }
+            });
+        }
+    } catch (e) {
+        // Silent fail - will retry next poll
+    }
+}
+
+setInterval(pollBoard, 2000);
+
+// Enable audio on first tap (mobile requirement)
+document.addEventListener('click', () => {
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+}, { once: true });
+</script>
+{% endblock %}

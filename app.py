@@ -4,17 +4,19 @@ import base64
 import socket
 import sqlite3
 import json
-import secrets
 from datetime import datetime
 from collections import Counter
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, g
 import qrcode
 
 app = Flask(__name__)
-app.secret_key = secrets.token_hex(32)
+app.secret_key = os.environ.get("SECRET_KEY", "dev-barfeud-change-me-in-prod")
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "barfeud.db")
+DB_PATH = os.environ.get("DB_PATH", os.path.join(os.path.dirname(__file__), "barfeud.db"))
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "barfeud2026")
+
+MAX_ANSWER_LENGTH = 200
+MAX_NAME_LENGTH = 50
 
 
 # ── Database ─────────────────────────────────────────────────────────────────
@@ -59,6 +61,7 @@ def init_db():
             count INTEGER DEFAULT 0,
             points INTEGER DEFAULT 0,
             rank INTEGER DEFAULT 0,
+            revealed INTEGER DEFAULT 0,
             FOREIGN KEY (question_id) REFERENCES questions(id)
         );
     """)
@@ -103,14 +106,14 @@ def consolidate_answers(question_id):
         if not matched:
             groups.append({"label": answer, "members": [answer]})
 
-    # Pick the most common phrasing as display label
+    # Pick the most common phrasing as display label (preserve original casing)
     for group in groups:
         counter = Counter(m.lower() for m in group["members"])
         most_common = counter.most_common(1)[0][0]
-        # Find original-case version
+        # Find original-case version and capitalize first letter only
         for m in group["members"]:
             if m.lower() == most_common:
-                group["label"] = m.title()
+                group["label"] = m[0].upper() + m[1:] if len(m) > 1 else m.upper()
                 break
 
     # Sort by count descending
@@ -144,6 +147,25 @@ def admin_required(f):
     return decorated
 
 
+def get_survey_url():
+    """Build the public survey URL based on environment."""
+    # If deployed (Render, etc.) use the request host directly
+    render_url = os.environ.get("RENDER_EXTERNAL_URL")
+    if render_url:
+        return render_url
+
+    # Check if behind a proxy / load balancer
+    forwarded_host = request.headers.get("X-Forwarded-Host")
+    forwarded_proto = request.headers.get("X-Forwarded-Proto", "http")
+    if forwarded_host:
+        return f"{forwarded_proto}://{forwarded_host}"
+
+    # Local development - use local network IP
+    local_ip = get_local_ip()
+    port = request.host.split(":")[-1] if ":" in request.host else "5050"
+    return f"http://{local_ip}:{port}"
+
+
 def get_local_ip():
     """Get the machine's local network IP."""
     try:
@@ -168,6 +190,18 @@ def make_qr_data_uri(url):
     return f"data:image/png;base64,{b64}"
 
 
+# ── Error pages ───────────────────────────────────────────────────────────────
+
+@app.errorhandler(404)
+def not_found(e):
+    return render_template("base.html", content="Page not found"), 404
+
+
+@app.errorhandler(500)
+def server_error(e):
+    return render_template("base.html", content="Something went wrong"), 500
+
+
 # ── Client routes ─────────────────────────────────────────────────────────────
 
 @app.route("/")
@@ -177,28 +211,36 @@ def survey():
         "SELECT * FROM questions WHERE active = 1 ORDER BY id"
     ).fetchall()
     submitted = session.get("submitted_questions", [])
-    return render_template("survey.html", questions=questions, submitted=submitted)
+    return render_template(
+        "survey.html", questions=questions, submitted=submitted,
+        total_questions=len(questions),
+    )
 
 
 @app.route("/submit", methods=["POST"])
 def submit():
     db = get_db()
-    respondent = request.form.get("respondent", "Anonymous")
+    respondent = request.form.get("respondent", "Anonymous").strip()[:MAX_NAME_LENGTH] or "Anonymous"
     submitted = session.get("submitted_questions", [])
 
     questions = db.execute("SELECT id FROM questions WHERE active = 1").fetchall()
+    new_answers = 0
     for q in questions:
-        answer = request.form.get(f"answer_{q['id']}", "").strip()
+        answer = request.form.get(f"answer_{q['id']}", "").strip()[:MAX_ANSWER_LENGTH]
         if answer and q["id"] not in submitted:
             db.execute(
                 "INSERT INTO responses (question_id, answer, respondent) VALUES (?, ?, ?)",
                 (q["id"], answer, respondent),
             )
             submitted.append(q["id"])
+            new_answers += 1
 
     db.commit()
     session["submitted_questions"] = submitted
-    flash("Thanks! Your answers are in. Good luck!", "success")
+    if new_answers:
+        flash("Thanks! Your answers are in. Good luck!", "success")
+    else:
+        flash("You've already answered all the questions!", "success")
     return redirect(url_for("survey"))
 
 
@@ -231,21 +273,27 @@ def admin_dashboard():
             "SELECT COUNT(*) as c FROM responses WHERE question_id = ?", (q["id"],)
         ).fetchone()["c"]
         stats[q["id"]] = count
-    local_ip = get_local_ip()
-    port = request.host.split(":")[-1] if ":" in request.host else "5050"
-    survey_url = f"http://{local_ip}:{port}"
+
+    survey_url = get_survey_url()
     qr_data = make_qr_data_uri(survey_url)
+
+    # Total response count across all active questions
+    total_responses = db.execute(
+        "SELECT COUNT(DISTINCT respondent) as c FROM responses r "
+        "JOIN questions q ON r.question_id = q.id WHERE q.active = 1"
+    ).fetchone()["c"]
+
     return render_template(
         "admin_dashboard.html", questions=questions, stats=stats,
-        survey_url=survey_url, qr_data=qr_data,
+        survey_url=survey_url, qr_data=qr_data, total_responses=total_responses,
     )
 
 
 @app.route("/admin/questions/add", methods=["POST"])
 @admin_required
 def add_question():
-    text = request.form.get("text", "").strip()
-    week = request.form.get("week_label", "").strip()
+    text = request.form.get("text", "").strip()[:500]
+    week = request.form.get("week_label", "").strip()[:50]
     if text:
         db = get_db()
         db.execute(
@@ -254,6 +302,8 @@ def add_question():
         )
         db.commit()
         flash("Question added!", "success")
+    else:
+        flash("Question text can't be empty", "error")
     return redirect(url_for("admin_dashboard"))
 
 
@@ -261,8 +311,11 @@ def add_question():
 @admin_required
 def toggle_question(qid):
     db = get_db()
+    q = db.execute("SELECT active FROM questions WHERE id = ?", (qid,)).fetchone()
     db.execute("UPDATE questions SET active = CASE WHEN active=1 THEN 0 ELSE 1 END WHERE id = ?", (qid,))
     db.commit()
+    status = "deactivated" if q and q["active"] else "activated"
+    flash(f"Question {status}!", "success")
     return redirect(url_for("admin_dashboard"))
 
 
@@ -283,6 +336,9 @@ def delete_question(qid):
 def view_responses(qid):
     db = get_db()
     question = db.execute("SELECT * FROM questions WHERE id = ?", (qid,)).fetchone()
+    if not question:
+        flash("Question not found", "error")
+        return redirect(url_for("admin_dashboard"))
     raw = db.execute(
         "SELECT * FROM responses WHERE question_id = ? ORDER BY created_at DESC", (qid,)
     ).fetchall()
@@ -316,7 +372,7 @@ def edit_answer(qid):
     """Let admin rename a consolidated answer's display text."""
     data = request.get_json()
     old_label = data.get("old_label")
-    new_label = data.get("new_label", "").strip()
+    new_label = data.get("new_label", "").strip()[:MAX_ANSWER_LENGTH]
     if old_label and new_label:
         db = get_db()
         db.execute(
@@ -343,6 +399,72 @@ def gameboard():
             "SELECT * FROM consolidated WHERE question_id = ? ORDER BY rank", (q["id"],)
         ).fetchall()
     return render_template("admin_gameboard.html", questions=questions, boards=boards)
+
+
+@app.route("/admin/questions/<int:qid>/reveal-next", methods=["POST"])
+@admin_required
+def reveal_next(qid):
+    """Reveal the next hidden answer on the board."""
+    db = get_db()
+    next_answer = db.execute(
+        "SELECT id FROM consolidated WHERE question_id = ? AND revealed = 0 ORDER BY rank LIMIT 1",
+        (qid,)
+    ).fetchone()
+    if next_answer:
+        db.execute("UPDATE consolidated SET revealed = 1 WHERE id = ?", (next_answer["id"],))
+        db.commit()
+        return jsonify({"ok": True, "revealed_id": next_answer["id"]})
+    return jsonify({"ok": False, "message": "All answers revealed"})
+
+
+@app.route("/admin/questions/<int:qid>/reset-reveals", methods=["POST"])
+@admin_required
+def reset_reveals(qid):
+    """Hide all answers again."""
+    db = get_db()
+    db.execute("UPDATE consolidated SET revealed = 0 WHERE question_id = ?", (qid,))
+    db.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/board")
+def live_board():
+    """Public-facing game board that auto-updates when admin reveals answers."""
+    db = get_db()
+    questions = db.execute(
+        "SELECT q.*, COUNT(c.id) as board_count FROM questions q "
+        "LEFT JOIN consolidated c ON c.question_id = q.id "
+        "GROUP BY q.id HAVING board_count > 0 ORDER BY q.id DESC"
+    ).fetchall()
+    boards = {}
+    for q in questions:
+        boards[q["id"]] = db.execute(
+            "SELECT * FROM consolidated WHERE question_id = ? ORDER BY rank", (q["id"],)
+        ).fetchall()
+    return render_template("live_board.html", questions=questions, boards=boards)
+
+
+@app.route("/api/board-state")
+def board_state():
+    """API endpoint for live board polling."""
+    db = get_db()
+    questions = db.execute(
+        "SELECT q.id, q.text, q.week_label FROM questions q "
+        "JOIN consolidated c ON c.question_id = q.id "
+        "GROUP BY q.id ORDER BY q.id DESC"
+    ).fetchall()
+    result = {}
+    for q in questions:
+        answers = db.execute(
+            "SELECT display_answer, points, rank, revealed FROM consolidated "
+            "WHERE question_id = ? ORDER BY rank", (q["id"],)
+        ).fetchall()
+        result[q["id"]] = {
+            "text": q["text"],
+            "week_label": q["week_label"],
+            "answers": [dict(a) for a in answers],
+        }
+    return jsonify(result)
 
 
 @app.route("/admin/reset-week", methods=["POST"])

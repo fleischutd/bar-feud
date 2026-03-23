@@ -15,26 +15,41 @@
         <p>Check back soon - new questions drop every week!</p>
     </div>
     {% else %}
+
+    {% set answered = submitted|length %}
+    {% set total = total_questions %}
+    <div class="progress-bar-container">
+        <div class="progress-bar" style="width: {{ (answered / total * 100) if total else 0 }}%"></div>
+    </div>
+    <div class="progress-text">{{ answered }} of {{ total }} answered</div>
+
     <form method="POST" action="{{ url_for('submit') }}">
         <div class="card">
             <label class="input-label" for="respondent">Your Name (optional)</label>
-            <input type="text" id="respondent" name="respondent" placeholder="Anonymous" class="text-input">
+            <input type="text" id="respondent" name="respondent" placeholder="Anonymous"
+                   class="text-input" maxlength="50">
         </div>
 
         {% for q in questions %}
         <div class="card {% if q.id in submitted %}submitted{% endif %}">
-            <div class="q-number">Q{{ loop.index }}</div>
+            <div class="q-number">Q{{ loop.index }} of {{ total }}</div>
             <label class="question-text" for="answer_{{ q.id }}">{{ q.text }}</label>
             {% if q.id in submitted %}
             <div class="already-answered">Answer submitted!</div>
             {% else %}
             <input type="text" id="answer_{{ q.id }}" name="answer_{{ q.id }}"
-                   placeholder="Your answer..." class="text-input" autocomplete="off">
+                   placeholder="Your answer..." class="text-input" autocomplete="off" maxlength="200">
             {% endif %}
         </div>
         {% endfor %}
 
+        {% if answered < total %}
         <button type="submit" class="btn btn-primary btn-full">Submit Answers</button>
+        {% else %}
+        <div class="card" style="text-align: center;">
+            <p style="font-weight: 700; color: var(--seafoam);">All done! Good luck on game night!</p>
+        </div>
+        {% endif %}
     </form>
     {% endif %}
 </div>
